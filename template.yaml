@@ -215,3 +215,73 @@ Resources:
       KeyType: API_KEY
       KeyId: !Ref ApiKey
       UsagePlanId: !Ref ApiUsagePlan
+
+
+##########################################################################
+# IAM Role to allow Lambda function to access DynamoDB table
+##########################################################################
+  PushDataToDynamoDBRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: latana.role.lambda.PushDataToDynamoDBRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/CloudWatchFullAccess
+        - arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess
+
+##########################################################################
+# Log group for Lambda function to push data in the DynamoDB table
+##########################################################################
+  LogGroupPushDataToDynamoDB:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: 60
+      LogGroupName: "data_mechanics/lambda/PushFieldworkMonitoringDataToDynamoDB"
+
+##########################################################################
+# Lambda function to push data in the DynamoDB table
+##########################################################################
+  PushDataToDynamoDBFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: main.lambda_handler
+      Runtime: python3.10
+      Timeout: 900
+      MemorySize: 1024
+      Role: !GetAtt PushDataToDynamoDBRole.Arn
+      Architectures:
+        - x86_64
+      AutoPublishAlias: live
+      Environment:
+        Variables:
+          ENVIRONMENT: !Ref Environment
+          DYNAMODB_TABLE_NAME: !Ref DynamoDBTableName
+          REGION_NAME: !Ref RegionName
+      Policies:
+        Version: 2012-10-17
+        Statement:
+          - Sid: CloudWatchLogGroup
+            Action:
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource: !GetAtt CloudWatchLogGroup.Arn
+            Effect: Allow
+      LoggingConfig:
+        LogFormat: JSON
+        ApplicationLogLevel: INFO
+        SystemLogLevel: INFO
+        LogGroup: !Ref LogGroupPushDataToDynamoDB
+      Events:
+        ScheduleEvent:
+          Type: Schedule
+          Properties:
+            Schedule: cron(0 5 * * ? *)
+      Layers:
+        - arn:aws:lambda:eu-west-1:017000801446:layer:AWSLambdaPowertoolsPythonV2:60
