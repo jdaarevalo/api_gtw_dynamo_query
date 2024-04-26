@@ -7,7 +7,7 @@ fi
 
 # Variables
 export AWS_REGION=eu-west-1
-export ENVIRONMENT="staging"
+export ENVIRONMENT=$1
 export AWS_PROFILE="channels-${ENVIRONMENT}"
 
 rm -rf .aws-sam/

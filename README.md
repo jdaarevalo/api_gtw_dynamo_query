@@ -1,5 +1,12 @@
 # Query DynamoDB data using API Gateway
 
+
+# Schedule Lambda to sync Athena with DynamoDB table
+This lambda run's with the following cron job expressions, which mean it will run daily at 5:00 am.
+```bash
+cron(0 5 * * ? *)
+```
+
 ### Create the virtual environment
 
 ```bash
@@ -64,3 +71,5 @@ Check the dummy data with the `scan` command to read every item in the table
 ```bash
 aws dynamodb scan --table-name fielwork_monitoring --endpoint-url http://localhost:8000
 ```
+
+

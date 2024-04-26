@@ -153,8 +153,8 @@ Resources:
                     {
                       "survey_uuid": "$field.survey_uuid.S",
                       "question_id": "$field.question_id.S",
-                      "budget": "$field.budget.N",
-                      "spent_budget": "$field.spent_budget.N"
+                      "budget": "$field.budget.S",
+                      "spent_budget": "$field.spent_budget.S"
                     }#if($foreach.hasNext),#end
                     #end
                   ]
@@ -234,6 +234,10 @@ Resources:
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/CloudWatchFullAccess
         - arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess
+        - arn:aws:iam::aws:policy/AmazonAthenaFullAccess
+        - arn:aws:iam::aws:policy/AWSGlueConsoleFullAccess
+        - arn:aws:iam::aws:policy/AWSLambda_FullAccess
 
 ##########################################################################
 # Log group for Lambda function to push data in the DynamoDB table
@@ -284,4 +288,5 @@ Resources:
           Properties:
             Schedule: cron(0 5 * * ? *)
       Layers:
+        - arn:aws:lambda:eu-west-1:336392948345:layer:AWSSDKPandas-Python310:9
         - arn:aws:lambda:eu-west-1:017000801446:layer:AWSLambdaPowertoolsPythonV2:60

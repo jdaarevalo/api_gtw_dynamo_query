@@ -16,7 +16,6 @@ FIELDWORK_QUERY = """
 		budget,
 		spent_budget
 	FROM fieldwork_monitoring.fieldwork_complete_status
-    limit 10
 	"""
 
 @logger.inject_lambda_context
@@ -28,18 +27,21 @@ def lambda_handler(event, context):
      )
      logger.info({"action":"fieldwork_data", "payload":{"len_fieldwork_data":len(fieldwork_data_df)}})
      # write to dynamodb
-     process_and_update_dynamodb(fieldwork_data_df.to_dict())
+     process_and_update_dynamodb(fieldwork_data_df)
      logger.info({"action":"write_to_dynamodb_finished"})
 
-def process_and_update_dynamodb(results):
+def process_and_update_dynamodb(results_df):
     # Initialize the DynamoDB client
     dynamodb = boto3.resource('dynamodb')
     table = dynamodb.Table(DYNAMODB_TABLE_NAME)
 
-    # Iterate through the result set and update DynamoDB
-    for record in results['ResultSet']['Rows'][1:]:  # Skip header row
-        data = [field['VarCharValue'] for field in record['Data']]
-        survey_uuid, question_id, budget, spent_budget = data
+    # Iterate through the DataFrame rows
+    for index, row in results_df.iterrows():
+        survey_uuid = row['survey_uuid']
+        question_id = row['question_id']
+        budget = row['budget']
+        spent_budget = row['spent_budget']
+        
         # Construct the key and update expression for DynamoDB
         response = table.update_item(
             Key={
@@ -48,9 +50,9 @@ def process_and_update_dynamodb(results):
             },
             UpdateExpression="SET budget = :budget, spent_budget = :spent_budget",
             ExpressionAttributeValues={
-                ':budget': budget,
-                ':spent_budget': spent_budget
+                ':budget': str(budget),
+                ':spent_budget': str(spent_budget)
             },
             ReturnValues="UPDATED_NEW"
         )
-        logger.info({"action":"update_dynamodb_response", "payload":response})
+        logger.info({"action": "update_dynamodb_response", "payload": response})
