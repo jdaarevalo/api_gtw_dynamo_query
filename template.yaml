@@ -9,12 +9,16 @@ Parameters:
     Description: Environment
   DynamoDBTableName:
     Type: String
-    Default: fielwork_monitoring
+    Default: fieldwork_monitoring
     Description: DynamoDB table for storing the data aggregated per survey_uuid and question_id
   RegionName:
     Type: String
     Description: Default region to perform DynamoDB queries
     Default: 'eu-west-1'
+  AppName:
+    Type: String
+    Default: fieldwork-monitoring-data
+    Description: Application Name
 
 Resources:
 ##########################################################################
@@ -37,46 +41,177 @@ Resources:
           AttributeName: "survey_uuid"
           AttributeType: "S"
         - 
-          AttributeName: "ts"
-          AttributeType: "question_id"
+          AttributeName: "question_id"
+          AttributeType: "S"
 
 ##########################################################################
-# Lambda function to push data in the DynamoDB table
+# IAM Role to allow API Gateway to access DynamoDB table
 ##########################################################################
-  PushDataToDynamoDBFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      CodeUri: src/
-      Handler: main.lambda_handler
-      Runtime: python3.10
-      Timeout: 900
-      MemorySize: 1024
-      Role: !GetAtt PushDataToDynamoDBRole.Arn
-      Architectures:
-        - x86_64
-      AutoPublishAlias: live
-      Environment:
-        Variables:
-          ENVIRONMENT: !Ref Environment
-          DYNAMODB_TABLE_NAME: !Ref DynamoDBTableName
-          REGION_NAME: !Ref RegionName
-      Layers:
-        - arn:aws:lambda:eu-west-1:017000801446:layer:AWSLambdaPowertoolsPythonV2:60
-
-##########################################################################
-# IAM Role to allow Lambda function to access DynamoDB table
-##########################################################################
-  PushDataToDynamoDBRole:
+  GatewayToDynamoDBReadRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: latana.role.lambda.PushDataToDynamoDBRole
+      RoleName: latana.role.lambda.GatewayToDynamoDBReadRole
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service: apigateway.amazonaws.com
             Action: sts:AssumeRole
+      Policies:
+        - PolicyName: APIGatewayDynamoDBQueryPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'dynamodb:Query'
+                  - 'dynamodb:GetItem' 
+                # Including * in the resource Arn allows access to the DynamoDB table and indexes
+                Resource: !Sub
+                  - '${varTableArn}*'
+                  - varTableArn: !GetAtt FieldworkMonitoringTable.Arn
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/CloudWatchFullAccess
-        - arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess
+        - arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs
+
+##########################################################################
+# API Gateway
+##########################################################################
+  Api:
+    Type: 'AWS::ApiGateway::RestApi'
+    Properties:
+      Name: !Sub '${AppName}'
+      ApiKeySourceType: HEADER
+
+##########################################################################
+# API Gateway Resource FieldworkData and survey_uuid
+##########################################################################
+  FieldworkDataResource:
+    Type: 'AWS::ApiGateway::Resource'
+    Properties:
+      RestApiId: !Ref Api
+      ParentId: !GetAtt Api.RootResourceId
+      PathPart: 'fieldwork_data'
+
+  SurveyUUIDResource:
+    Type: 'AWS::ApiGateway::Resource'
+    Properties:
+      RestApiId: !Ref Api
+      ParentId: !Ref FieldworkDataResource
+      PathPart: '{survey_uuid}'
+
+##########################################################################
+# API Gateway Get method
+##########################################################################
+  FieldworkSurveyDataMethodGet:
+    Type: 'AWS::ApiGateway::Method'
+    Properties:
+      RestApiId: !Ref Api
+      ResourceId: !Ref SurveyUUIDResource
+      HttpMethod: GET
+      ApiKeyRequired: true
+      AuthorizationType: NONE
+      RequestParameters:
+        # Determines the path parameter survey_uuid is required
+        method.request.path.survey_uuid: true
+      Integration:
+        Type: AWS
+        Credentials: !GetAtt GatewayToDynamoDBReadRole.Arn
+        # Should always be POST when integrating with AWS services
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:dynamodb:action/Query'
+        PassthroughBehavior: WHEN_NO_TEMPLATES
+        RequestParameters:
+          integration.request.path.survey_uuid: method.request.path.survey_uuid
+        RequestTemplates:
+          # Build the structure of the request that is sent when calling DynamoDB Query
+          # Use $util.urlDecode($input.params('survey_uuid')) to decode if the url path value contains spaces
+          application/json: !Sub |
+                {
+                  "TableName": "${DynamoDBTableName}",
+                  "KeyConditionExpression": "survey_uuid = :survey_uuid",
+                  "ExpressionAttributeValues": {
+                    ":survey_uuid": {
+                      "S": "$util.urlDecode($input.params('survey_uuid'))"
+                    }
+                  }
+                }
+        IntegrationResponses:
+          - StatusCode: '200'
+            ResponseTemplates:
+              # Modify the response of the DynamoDB Query before sending back to the caller
+              # Using single-line Velocity Template Language (VTL) code as the mapping template
+              # Example response: 
+              # {"fieldwork-data": [{
+              #   "survey_uuid": "2a82c6a2-852f-4fbb-b9b0-3debf6183076", "question_id": "brand_perception_eisde",
+              #   "budget": "2000", "spent_budget": "1000" }]}
+              application/json: !Sub |
+                #set($inputRoot = $input.path('$'))
+                {
+                  "fieldwork-data": [
+                    #foreach($field in $inputRoot.Items)
+                    {
+                      "survey_uuid": "$field.survey_uuid.S",
+                      "question_id": "$field.question_id.S",
+                      "budget": "$field.budget.N",
+                      "spent_budget": "$field.spent_budget.N"
+                    }#if($foreach.hasNext),#end
+                    #end
+                  ]
+                }
+      MethodResponses:
+        - StatusCode: '200'
+
+##########################################################################
+# API Gateway Deployment
+##########################################################################
+  ApiDeployment:
+    Type: 'AWS::ApiGateway::Deployment'
+    DependsOn:
+      - FieldworkSurveyDataMethodGet
+    Properties:
+      RestApiId: !Ref Api
+      StageName: !Sub '${Environment}'
+
+##########################################################################
+# API Gateway ApiKey
+##########################################################################
+  ApiKey:
+    Type: 'AWS::ApiGateway::ApiKey'
+    DependsOn:
+      - ApiDeployment
+    Properties:
+      Enabled: true
+      Name: !Sub '${AppName}-apikey'
+      StageKeys:
+        - RestApiId: !Ref Api
+          StageName: !Sub '${Environment}'
+
+##########################################################################
+# API Gateway ApiKey - ApiUsagePlan
+##########################################################################
+  ApiUsagePlan:
+    Type: 'AWS::ApiGateway::UsagePlan'
+    DependsOn:
+      - ApiDeployment
+    Properties:
+      ApiStages:
+        - ApiId: !Ref Api
+          Stage: !Sub '${Environment}'
+      Throttle:
+        RateLimit: 500
+        BurstLimit: 1000
+      UsagePlanName: !Sub '${AppName}-usage-plan'
+      Quota:
+        Limit: 10000
+        Period: MONTH
+
+##########################################################################
+# API Gateway ApiKey - ApiUsagePlanKey
+##########################################################################
+  ApiUsagePlanKey:
+    Type: 'AWS::ApiGateway::UsagePlanKey'
+    Properties:
+      KeyType: API_KEY
+      KeyId: !Ref ApiKey
+      UsagePlanId: !Ref ApiUsagePlan
