@@ -1,0 +1,15 @@
+{
+    "TableName": "fielwork_monitoring",
+    "KeySchema": [
+      { "AttributeName": "survey_uuid", "KeyType": "HASH" },
+      { "AttributeName": "question_id", "KeyType": "RANGE" }
+    ],
+    "AttributeDefinitions": [
+      { "AttributeName": "survey_uuid", "AttributeType": "S" },
+      { "AttributeName": "question_id", "AttributeType": "S" }
+    ],
+    "ProvisionedThroughput": {
+      "ReadCapacityUnits": 10,
+      "WriteCapacityUnits": 10
+    }
+}

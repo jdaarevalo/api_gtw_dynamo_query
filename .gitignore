@@ -1,0 +1,8 @@
+.aws-sam/
+libs/
+.ipynb_checkpoints/
+test*.ipynb
+env_vars.json
+**/__pycache__/*
+local-dynamodb-data/
+.pytest_cache/

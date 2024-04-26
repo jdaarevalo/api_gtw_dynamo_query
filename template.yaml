@@ -1,0 +1,82 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  API Gateway endpoint to Query DynamoDB table for survey_uuid
+
+Parameters:
+  Environment:
+    Type: String
+    Description: Environment
+  DynamoDBTableName:
+    Type: String
+    Default: fielwork_monitoring
+    Description: DynamoDB table for storing the data aggregated per survey_uuid and question_id
+  RegionName:
+    Type: String
+    Description: Default region to perform DynamoDB queries
+    Default: 'eu-west-1'
+
+Resources:
+##########################################################################
+# DynamoDB table to store executions status
+##########################################################################
+  FieldworkMonitoringTable: 
+    Type: AWS::DynamoDB::Table
+    Properties: 
+      TableName: !Ref DynamoDBTableName
+      BillingMode: 'PAY_PER_REQUEST'
+      KeySchema: 
+        - 
+          AttributeName: "survey_uuid"
+          KeyType: "HASH"
+        - 
+          AttributeName: "question_id"
+          KeyType: "RANGE"
+      AttributeDefinitions: 
+        - 
+          AttributeName: "survey_uuid"
+          AttributeType: "S"
+        - 
+          AttributeName: "ts"
+          AttributeType: "question_id"
+
+##########################################################################
+# Lambda function to push data in the DynamoDB table
+##########################################################################
+  PushDataToDynamoDBFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: main.lambda_handler
+      Runtime: python3.10
+      Timeout: 900
+      MemorySize: 1024
+      Role: !GetAtt PushDataToDynamoDBRole.Arn
+      Architectures:
+        - x86_64
+      AutoPublishAlias: live
+      Environment:
+        Variables:
+          ENVIRONMENT: !Ref Environment
+          DYNAMODB_TABLE_NAME: !Ref DynamoDBTableName
+          REGION_NAME: !Ref RegionName
+      Layers:
+        - arn:aws:lambda:eu-west-1:017000801446:layer:AWSLambdaPowertoolsPythonV2:60
+
+##########################################################################
+# IAM Role to allow Lambda function to access DynamoDB table
+##########################################################################
+  PushDataToDynamoDBRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: latana.role.lambda.PushDataToDynamoDBRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/CloudWatchFullAccess
+        - arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess

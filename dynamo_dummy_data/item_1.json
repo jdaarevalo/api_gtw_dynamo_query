@@ -1,0 +1,5 @@
+{
+    "survey_uuid": {"S": "123"},
+    "question_id": {"S": "question_1"},
+    "extra_attribute": {"S": "value_1"}
+}
